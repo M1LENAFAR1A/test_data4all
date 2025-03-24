@@ -1,6 +1,6 @@
 # arquivo: local_minio_connector.py
 import os
-from schemas.response import MinioResponse
+from app.schemas.response import MinioResponse
 
 class LocalMinioConnector:
     """
