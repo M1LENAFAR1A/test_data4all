@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from app.connectors.minio import MinioConnector
-from app.core.config import settings
-from app.schemas.response import MinioResponse, Response
-from app.utils.date import processar_csv
-from app.utils.taxonomy import apply_taxonomy_transformation
+from connectors.minio import MinioConnector
+from core.config import settings
+from schemas.response import MinioResponse, Response
+from utils.date import processar_csv
+from utils.taxonomy import apply_taxonomy_transformation
 
 TAXONOMY_FILE = settings.TAXONOMY_FILE
 
