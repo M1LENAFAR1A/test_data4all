@@ -11,20 +11,27 @@ from app.core.config import settings
 from app.schemas.response import MinioResponse, Response
 from app.utils.date import processar_csv
 
-# Arquivo de taxonomia (deve conter as colunas 'original' e 'taxonomy')
+# O arquivo de taxonomia deve conter as colunas 'original' e 'taxonomy'
 TAXONOMY_FILE = settings.TAXONOMY_FILE
 
 
 class TransformationPipeline:
     def __init__(self, output_folder, minio_connector: MinioConnector):
-        self.output_folder = output_folder.rstrip("/") + "/"  # garante que termina com '/'
+        # Garante que o diretório de saída termine com '/'
+        self.output_folder = output_folder.rstrip("/") + "/"
         self.minio_connector = minio_connector
         self.logger = logging.getLogger('app')
 
     def create_transformation_directory(self):
-        os.makedirs(self.output_folder, exist_ok=True)
+        try:
+            os.makedirs(self.output_folder, exist_ok=True)
+            self.logger.info("Output folder ensured: %s", self.output_folder)
+        except Exception as e:
+            self.logger.error("Error creating output directory: %s", e)
 
     def run(self, file_path: str) -> tuple[bool, str]:
+        # Garante que o diretório de saída exista
+        self.create_transformation_directory()
         self.logger.info(' [*] Starting pipeline...')
         self.logger.info('Applying date and coordinates transformations')
         date_transformation_response: Response = self.date_transformation(file_path=file_path)
@@ -34,23 +41,26 @@ class TransformationPipeline:
             new_filename = date_transformation_response.value
             taxonomy_transformation_response = self.taxonomy_transformation(new_filename=new_filename)
             if not taxonomy_transformation_response.success:
-                os.remove(urllib.parse.urljoin(self.output_folder, new_filename))
+                try:
+                    os.remove(os.path.join(self.output_folder, new_filename))
+                except Exception as e:
+                    self.logger.warning("Could not remove intermediate file: %s", e)
                 return False, taxonomy_transformation_response.value
 
             self.logger.info("Taxonomy transformation successful. Output file: %s", taxonomy_transformation_response.value)
             self.logger.info("Inserting transformed value into Minio")
-            transformed_basename = taxonomy_transformation_response.value.split("/")[-1]
+            transformed_basename = os.path.basename(taxonomy_transformation_response.value)
             self.insert_file_into_minio(
                 file_path=taxonomy_transformation_response.value,
                 new_filename=f'/transformed/{transformed_basename}'
             )
             # Remove o arquivo intermediário da transformação de data
             try:
-                os.remove(urllib.parse.urljoin(self.output_folder, new_filename))
+                os.remove(os.path.join(self.output_folder, new_filename))
             except Exception as e:
                 self.logger.warning("Could not remove intermediate file: %s", e)
             # Verifica e envia arquivo de espécies ausentes, se existir
-            missing_species_path = urllib.parse.urljoin(self.output_folder, 'missing_species.csv')
+            missing_species_path = os.path.join(self.output_folder, 'missing_species.csv')
             if os.path.exists(missing_species_path):
                 self.logger.info('Inserting missing species into data lake')
                 self.insert_file_into_minio(
@@ -73,7 +83,7 @@ class TransformationPipeline:
             except Exception as e:
                 self.logger.error("Error reading CSV from Minio: %s", e)
                 return Response(success=False, value=f"Error reading CSV: {e}")
-            # processar_csv deve processar o DataFrame e salvar o arquivo transformado no output_folder
+            # processar_csv deve salvar o arquivo transformado no output_folder e retornar o nome do arquivo
             processing_response = processar_csv(df=df, file_path=file_path, output_folder=self.output_folder)
             self.logger.info("processar_csv returned: %s", processing_response)
             return Response(success=True, value=processing_response)
@@ -120,7 +130,7 @@ class TransformationPipeline:
             csv_size = os.stat(csv_path).st_size
             with open(csv_path, 'rb') as csv:
                 self.minio_connector.upload_data(
-                    file_path=f'{new_filename}',
+                    file_path=new_filename,
                     data=csv,
                     content_type='text/csv',
                     file_size=csv_size
